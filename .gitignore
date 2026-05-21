@@ -1,0 +1,5 @@
+build/
+.vscode/settings.json
+csopesy-log.txt
+*.o
+*.exe
