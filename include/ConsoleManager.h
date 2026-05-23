@@ -1,6 +1,8 @@
 #pragma once
 
 class ConsoleManager {
-public:
+  public:
     void run();
+    void displayHeader();
+    void clearScreen();
 };

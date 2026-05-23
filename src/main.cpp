@@ -1,4 +1,4 @@
-#include "headers/ConsoleManager.h"
+#include "ConsoleManager.h"
 
 int main() {
     ConsoleManager console;
