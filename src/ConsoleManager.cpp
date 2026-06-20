@@ -1,5 +1,5 @@
 #include "ConsoleManager.h"
-#include <Config.h>
+#include "Config.h"
 #include <iostream>
 #include <iomanip>
 #include <string>
@@ -30,38 +30,14 @@ void ConsoleManager::clearScreen(){
 }
 
 void ConsoleManager::run() {
-    std::string input;
+    // Keep ConsoleManager lightweight: just show the header and return.
+    // The main program owns the interactive loop so commands and scheduler
+    // lifecycle are handled there.
     displayHeader();
     std::cout << "root:\\> ";
-    
-    while (std::getline(std::cin, input)) {
-        if(input.empty()){
-            displayHeader();
-            std::cout << "root:\\> ";
-            continue;
-        }
+}
 
-        if (input == "exit") {
-            clearScreen();
-            break;
-        } else if (input == "clear") {
-            clearScreen();
-            displayHeader();
-        } else if (
-            input == "initialize" || 
-            input == "screen" || 
-            input == "scheduler-start" || 
-            input == "scheduler-stop" || 
-            input == "report-util") {
-            std::cout << input << " command recognized. Doing something.\n";
-        } else {
-            std::cout << "Command not yet implemented: " << input << "\n";
-        }
-
-        std::cout << "\nroot:\\> ";
-    }
-
-void printScreenLs(const Scheduler& scheduler) {
+void ConsoleManager::printScreenLs(const Scheduler& scheduler) {
     SchedulerSnapshot snap = scheduler.getSnapshot();
     int coresAvailable = snap.numCores - snap.coresUsed;
     int utilization = (snap.numCores > 0) ? (snap.coresUsed * 100 / snap.numCores) : 0;

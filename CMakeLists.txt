@@ -5,9 +5,9 @@ set(CMAKE_CXX_STANDARD 17)
 
 file(GLOB_RECURSE SOURCES "src/*.cpp")
 
-add_executable(csopesy ${SOURCES})
+add_executable(csopesy_scheduler ${SOURCES})
 
-target_include_directories(csopesy PRIVATE include)
+target_include_directories(csopesy_scheduler PRIVATE include)
 
 find_package(Threads REQUIRED)
-target_link_libraries(csopesy Threads::Threads)
+target_link_libraries(csopesy_scheduler Threads::Threads)

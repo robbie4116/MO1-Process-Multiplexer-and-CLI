@@ -1,11 +1,12 @@
-#include "process.h"
+#include "Process.h"
 
 #include <chrono>
 #include <fstream>
 #include <thread>
+#include <iostream>
 
-#include "config.h"
-#include "utils.h"
+#include "Config.h"
+#include "Utils.h"
 
 Process::Process(std::string name_, int id_, int totalInstructions_)
     : name(std::move(name_)), id(id_), totalInstructions(totalInstructions_) {}
@@ -25,6 +26,11 @@ void Process::run(int coreId) {
     state = ProcState::RUNNING;
 
     std::ofstream outFile(config::OUTPUT_DIR + "/" + name + ".txt");
+    if (!outFile.is_open()) {
+        std::cerr << "Error: Could not open log file for " << name << "\n";
+        state = ProcState::FINISHED;
+        return;
+    }
     outFile << "Process name: " << name << "\n";
     outFile << "Logs:\n\n";
 

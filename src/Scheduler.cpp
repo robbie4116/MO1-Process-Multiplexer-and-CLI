@@ -1,4 +1,4 @@
-#include "scheduler.h"
+#include "Scheduler.h"
 
 #include <algorithm>
 #include <cstdio>
@@ -84,7 +84,7 @@ void Scheduler::schedulerLoop() {
             if (core.busy) continue;
             auto proc = readyQueue_.front();
             readyQueue_.pop();
-            proc->coreId = core.id;
+            proc->coreId.store(core.id);
             core.assigned = proc;
             core.busy = true;
         }
