@@ -38,7 +38,7 @@ int main() {
     // upon the start of the emulator (FCFS arrival order p01..p10).
     scheduler.createProcesses(config::NUM_PROCESSES, config::INSTRUCTIONS_PER_PROCESS);
 
-    std::cout << config::NUM_PROCESSES << " processes created (p01..p"
+    std::cout << config::NUM_PROCESSES << " processes created (screen_01..screen_"
               << (config::NUM_PROCESSES < 10 ? "0" : "") << config::NUM_PROCESSES
               << "), each with " << config::INSTRUCTIONS_PER_PROCESS
               << " PRINT instructions.\n";

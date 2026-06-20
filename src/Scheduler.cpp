@@ -14,7 +14,7 @@ void Scheduler::createProcesses(int count, int instructionsPerProcess) {
     std::lock_guard<std::mutex> lk(mutex_);
     for (int i = 1; i <= count; ++i) {
         char buf[16];
-        std::snprintf(buf, sizeof(buf), "p%02d", i);
+        std::snprintf(buf, sizeof(buf), "screen_%02d", i);
         auto proc = std::make_shared<Process>(buf, i, instructionsPerProcess);
         allProcesses_.push_back(proc);
         readyQueue_.push(proc);
