@@ -1,5 +1,7 @@
 #include "ConsoleManager.h"
+#include <Config.h>
 #include <iostream>
+#include <iomanip>
 #include <string>
 
 void ConsoleManager::displayHeader(){
@@ -58,4 +60,35 @@ void ConsoleManager::run() {
 
         std::cout << "\nroot:\\> ";
     }
+
+void printScreenLs(const Scheduler& scheduler) {
+    SchedulerSnapshot snap = scheduler.getSnapshot();
+    int coresAvailable = snap.numCores - snap.coresUsed;
+    int utilization = (snap.numCores > 0) ? (snap.coresUsed * 100 / snap.numCores) : 0;
+
+    std::cout << "\nCPU utilization: " << utilization << "%\n";
+    std::cout << "Cores used: " << snap.coresUsed << "\n";
+    std::cout << "Cores available: " << coresAvailable << "\n\n";
+    std::cout << "--------------------------------\n";
+
+    std::cout << "Running processes:\n";
+    for (auto& proc : snap.allProcessesInOrder) {
+        if (proc->state.load() == ProcState::RUNNING) {
+            std::cout << std::left << std::setw(10) << proc->name
+                       << " (" << proc->getStartTimestamp() << ")"
+                       << "   Core: " << proc->coreId.load()
+                       << "    " << proc->currentInstruction.load()
+                       << " / " << proc->totalInstructions << "\n";
+        }
+    }
+
+    std::cout << "\nFinished processes:\n";
+    for (auto& proc : snap.finishedInOrder) {
+        std::cout << std::left << std::setw(10) << proc->name
+                   << " (" << proc->getStartTimestamp() << ")"
+                   << "   Finished"
+                   << "    " << proc->totalInstructions
+                   << " / " << proc->totalInstructions << "\n";
+    }
+    std::cout << "--------------------------------\n\n";
 }
