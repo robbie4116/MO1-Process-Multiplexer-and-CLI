@@ -35,9 +35,9 @@ public:
 
     const std::string name;
     const int id;
-    const int totalInstructions;
+    uint64_t totalInstructions = 0;
 
-    std::atomic<int>       currentInstruction{0};
+    std::atomic<uint64_t>  currentInstruction{0};
     std::atomic<int>       coreId{-1};
     std::atomic<ProcState> state{ProcState::READY};
 
@@ -45,6 +45,8 @@ private:
     uint16_t& getOrDeclareVar(const std::string& varName);
     void appendLog(const std::string& entry);
     void setStartTimestamp(const std::string& ts);
+    static std::vector<std::shared_ptr<Instruction>> expandInstructions(
+        const std::vector<std::shared_ptr<Instruction>>& instructions);
 
     std::vector<std::shared_ptr<Instruction>> instructions_;
     std::unordered_map<std::string, uint16_t>  variables_;

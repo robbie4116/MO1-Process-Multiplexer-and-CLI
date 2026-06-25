@@ -152,13 +152,18 @@ void ConsoleManager::handleScreen(const std::string& args) {
         if (scheduler_->findProcess(pname)) {
             std::cout << "Process '" << pname << "' already exists.\n"; return;
         }
-        int idx = scheduler_->allocateProcessId();
-        auto instrs = generateRandomInstructions(pname,
-                        static_cast<int>(config_.minIns),
-                        static_cast<int>(config_.maxIns));
-        auto proc = std::make_shared<Process>(pname, idx, std::move(instrs));
-        scheduler_->addProcess(proc);
-        enterProcessScreen(proc);
+        try {
+            int idx = scheduler_->allocateProcessId();
+            auto instrs = generateRandomInstructions(
+                pname, config_.minIns, config_.maxIns);
+            auto proc =
+                std::make_shared<Process>(pname, idx, std::move(instrs));
+            scheduler_->addProcess(proc);
+            enterProcessScreen(proc);
+        } catch (const std::exception& error) {
+            std::cout << "Error: could not create process: "
+                      << error.what() << "\n";
+        }
 
     } else if (flag == "-r") {
         iss >> pname;

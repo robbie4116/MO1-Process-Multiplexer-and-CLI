@@ -5,8 +5,10 @@
 #include <algorithm>
 #include <chrono>
 #include <cstdio>
+#include <iostream>
 #include <sstream>
 #include <iomanip>
+#include <stdexcept>
 
 Scheduler::Scheduler(const Config& cfg) : cfg_(cfg) {
     cores_.resize(cfg_.numCpu);
@@ -28,6 +30,16 @@ int Scheduler::allocateProcessId() {
 
 void Scheduler::addProcess(std::shared_ptr<Process> proc) {
     std::lock_guard<std::mutex> lk(mutex_);
+    const bool duplicate = std::any_of(
+        allProcesses_.begin(),
+        allProcesses_.end(),
+        [&proc](const auto& existing) {
+            return existing->name == proc->name;
+        });
+    if (duplicate) {
+        throw std::invalid_argument(
+            "process name '" + proc->name + "' already exists");
+    }
     allProcesses_.push_back(proc);
     readyQueue_.push(proc);
     cv_.notify_all();
@@ -109,11 +121,21 @@ void Scheduler::shutdown() {
 
 // ── Batch generation ──────────────────────────────────────────────────────────
 void Scheduler::generateBatchProcess() {
-    const int nameIndex = nextBatchNameIndex_++;
-    std::string pname = makeProcessName(nameIndex);
+    std::string pname;
+    bool nameExists = false;
+    do {
+        pname = makeProcessName(nextBatchNameIndex_++);
+        nameExists = std::any_of(
+            allProcesses_.begin(),
+            allProcesses_.end(),
+            [&pname](const auto& process) {
+                return process->name == pname;
+            });
+    } while (nameExists);
+
     auto instrs = generateRandomInstructions(pname,
-                    static_cast<int>(cfg_.minIns),
-                    static_cast<int>(cfg_.maxIns));
+                    cfg_.minIns,
+                    cfg_.maxIns);
     auto proc = std::make_shared<Process>(
         pname, allocateProcessId(), std::move(instrs));
     allProcesses_.push_back(proc);
@@ -189,7 +211,13 @@ void Scheduler::mainLoop() {
 
             // 2. Batch generation is relative to scheduler-start.
             if (batchRunning_.load() && tick >= nextBatchGenerationTick_) {
-                generateBatchProcess();
+                try {
+                    generateBatchProcess();
+                } catch (const std::exception& error) {
+                    batchRunning_.store(false);
+                    std::cerr << "Error: batch process generation stopped: "
+                              << error.what() << '\n';
+                }
                 nextBatchGenerationTick_ =
                     tick + static_cast<uint64_t>(cfg_.batchProcessFreq);
             }

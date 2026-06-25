@@ -22,8 +22,8 @@ struct ProcessStatusSnapshot {
     std::string name;
     int id = 0;
     int coreId = -1;
-    int currentInstruction = 0;
-    int totalInstructions = 0;
+    uint64_t currentInstruction = 0;
+    uint64_t totalInstructions = 0;
     std::string startTimestamp;
 };
 

@@ -29,6 +29,49 @@ std::shared_ptr<Instruction> printInstruction(const std::string& message = "test
     return instruction;
 }
 
+std::shared_ptr<Instruction> printVariableInstruction(
+    const std::string& message,
+    const std::string& variable) {
+    auto instruction = printInstruction(message);
+    instruction->printHasVar = true;
+    instruction->printVar = variable;
+    return instruction;
+}
+
+std::shared_ptr<Instruction> declareInstruction(
+    const std::string& variable,
+    uint16_t value) {
+    auto instruction = std::make_shared<Instruction>();
+    instruction->type = InstrType::DECLARE;
+    instruction->declVar = variable;
+    instruction->declValue = value;
+    return instruction;
+}
+
+std::shared_ptr<Instruction> addLiteralInstruction(
+    const std::string& destination,
+    const std::string& source,
+    uint16_t amount) {
+    auto instruction = std::make_shared<Instruction>();
+    instruction->type = InstrType::ADD;
+    instruction->arithVar1 = destination;
+    instruction->arithVar2 = source;
+    instruction->arithIsLit2 = false;
+    instruction->arithLit3 = amount;
+    instruction->arithIsLit3 = true;
+    return instruction;
+}
+
+std::shared_ptr<Instruction> forInstruction(
+    std::vector<std::shared_ptr<Instruction>> body,
+    uint32_t repeats) {
+    auto instruction = std::make_shared<Instruction>();
+    instruction->type = InstrType::FOR;
+    instruction->forBody = std::move(body);
+    instruction->forRepeats = repeats;
+    return instruction;
+}
+
 std::shared_ptr<Instruction> sleepInstruction(uint8_t ticks) {
     auto instruction = std::make_shared<Instruction>();
     instruction->type = InstrType::SLEEP;
@@ -74,6 +117,107 @@ Config baseConfig() {
     config.maxIns = 2000;
     config.delayPerExec = 0;
     return config;
+}
+
+void executeToCompletion(Process& process) {
+    uint64_t tick = 0;
+    while (process.executeNextInstruction(0, tick++)) {
+        require(tick < 100000, "process did not finish");
+    }
+}
+
+bool containsFor(const std::vector<std::shared_ptr<Instruction>>& instructions) {
+    for (const auto& instruction : instructions) {
+        if (instruction->type == InstrType::FOR) return true;
+        if (containsFor(instruction->forBody)) return true;
+    }
+    return false;
+}
+
+int maximumForDepth(
+    const std::vector<std::shared_ptr<Instruction>>& instructions,
+    int parentDepth = 0) {
+    int maximum = parentDepth;
+    for (const auto& instruction : instructions) {
+        if (instruction->type != InstrType::FOR) continue;
+        maximum = std::max(
+            maximum,
+            maximumForDepth(instruction->forBody, parentDepth + 1));
+    }
+    return maximum;
+}
+
+void testPrintCanAppendDeclaredVariable() {
+    Process process("printer", 1, {
+        declareInstruction("x", 42),
+        printVariableInstruction("Value from: ", "x"),
+    });
+    executeToCompletion(process);
+    const auto logs = process.getLogs();
+    require(logs.size() == 1, "PRINT did not create one log entry");
+    require(logs[0].find("\"Value from: 42\"") != std::string::npos,
+            "PRINT did not append the declared variable value");
+}
+
+void testPrintAutoDeclaresUnknownVariable() {
+    Process process("printer", 1, {
+        printVariableInstruction("Unknown: ", "missing"),
+    });
+    executeToCompletion(process);
+    const auto logs = process.getLogs();
+    require(logs.size() == 1, "PRINT did not create one log entry");
+    require(logs[0].find("\"Unknown: 0\"") != std::string::npos,
+            "PRINT did not auto-declare an unknown variable at zero");
+}
+
+void testNestedForExecutesExpandedInstructions() {
+    auto inner = forInstruction({
+        addLiteralInstruction("x", "x", 1),
+    }, 3);
+    auto outer = forInstruction({inner}, 2);
+    Process process("loops", 1, {
+        declareInstruction("x", 0),
+        outer,
+        printVariableInstruction("Value: ", "x"),
+    });
+
+    require(process.totalInstructions == 8,
+            "nested FOR did not expand to the expected instruction count");
+    executeToCompletion(process);
+    const auto logs = process.getLogs();
+    require(logs.size() == 1 &&
+                logs[0].find("\"Value: 6\"") != std::string::npos,
+            "nested FOR did not execute its body for every repetition");
+}
+
+void testForNestingDeeperThanThreeIsRejected() {
+    auto level4 = forInstruction({printInstruction()}, 1);
+    auto level3 = forInstruction({level4}, 1);
+    auto level2 = forInstruction({level3}, 1);
+    auto level1 = forInstruction({level2}, 1);
+
+    bool rejected = false;
+    try {
+        Process process("too-deep", 1, {level1});
+    } catch (const std::invalid_argument&) {
+        rejected = true;
+    }
+    require(rejected, "FOR nesting deeper than three levels was accepted");
+}
+
+void testSeededGeneratorProducesExactProgramsWithFor() {
+    bool foundFor = false;
+    for (uint32_t seed = 1; seed <= 100; ++seed) {
+        auto instructions =
+            generateRandomInstructions("generated", 40, 40, seed);
+        Process process("generated", 1, instructions);
+        require(process.totalInstructions == 40,
+                "generated program did not preserve configured instruction count");
+        require(maximumForDepth(instructions) <= 3,
+                "generated FOR nesting exceeded three levels");
+        foundFor = foundFor || containsFor(instructions);
+    }
+    require(foundFor, "random generator never produced a FOR instruction");
 }
 
 void testAllCoresStayOccupiedWithRunnableBacklog() {
@@ -245,6 +389,41 @@ void testManualAndGeneratedProcessesUseUniqueIds() {
     scheduler.shutdown();
 }
 
+void testGeneratedProcessNamesSkipExistingManualNames() {
+    auto config = baseConfig();
+    config.numCpu = 1;
+    config.batchProcessFreq = 1;
+    config.minIns = 100;
+    config.maxIns = 100;
+    Scheduler scheduler(config);
+    scheduler.addProcess(longRunningProcess(
+        "p01", scheduler.allocateProcessId()));
+    scheduler.start();
+    scheduler.startBatchGeneration();
+
+    require(waitUntil([&] {
+        return scheduler.getSnapshot().allProcessesInOrder.size() >= 2;
+    }), "generated process was not created");
+    const auto snapshot = scheduler.getSnapshot();
+    require(snapshot.allProcessesInOrder[1]->name == "p02",
+            "batch generation reused an existing manual process name");
+    scheduler.shutdown();
+}
+
+void testSchedulerRejectsDuplicateProcessNames() {
+    auto config = baseConfig();
+    Scheduler scheduler(config);
+    scheduler.addProcess(longRunningProcess("duplicate", 1));
+
+    bool rejected = false;
+    try {
+        scheduler.addProcess(longRunningProcess("duplicate", 2));
+    } catch (const std::invalid_argument&) {
+        rejected = true;
+    }
+    require(rejected, "scheduler accepted duplicate process names");
+}
+
 void writeConfig(const std::filesystem::path& path, const std::string& body) {
     std::ofstream file(path);
     file << body;
@@ -330,6 +509,16 @@ void run(const char* name, const std::function<void()>& test, int& failures) {
 
 int main() {
     int failures = 0;
+    run("PRINT can append a declared variable",
+        testPrintCanAppendDeclaredVariable, failures);
+    run("PRINT auto-declares an unknown variable",
+        testPrintAutoDeclaresUnknownVariable, failures);
+    run("nested FOR executes expanded instructions",
+        testNestedForExecutesExpandedInstructions, failures);
+    run("FOR nesting deeper than three is rejected",
+        testForNestingDeeperThanThreeIsRejected, failures);
+    run("seeded generator produces exact programs with FOR",
+        testSeededGeneratorProducesExactProgramsWithFor, failures);
     run("all cores stay occupied with runnable backlog",
         testAllCoresStayOccupiedWithRunnableBacklog, failures);
     run("snapshot running rows match assigned cores",
@@ -346,6 +535,10 @@ int main() {
         testSchedulerStopHaltsBatchGeneration, failures);
     run("manual and generated processes use unique IDs",
         testManualAndGeneratedProcessesUseUniqueIds, failures);
+    run("generated process names skip existing manual names",
+        testGeneratedProcessNamesSkipExistingManualNames, failures);
+    run("scheduler rejects duplicate process names",
+        testSchedulerRejectsDuplicateProcessNames, failures);
     run("configuration values are validated",
         testConfigValidation, failures);
     return failures == 0 ? 0 : 1;

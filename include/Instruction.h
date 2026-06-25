@@ -12,6 +12,8 @@ struct Instruction {
 
     // PRINT
     std::string printMsg;   // literal part, e.g. "Hello world from p01!"
+    bool        printHasVar = false;
+    std::string printVar;
 
     // DECLARE
     std::string declVar;
@@ -31,11 +33,17 @@ struct Instruction {
 
     // FOR
     std::vector<std::shared_ptr<Instruction>> forBody;
-    int forRepeats = 1;
+    uint32_t forRepeats = 1;
 };
 
-// Generates a random flat list of instructions (no FOR nesting yet).
-// Call this during scheduler-start to populate a process.
+// Generates an instruction tree whose expanded executable instruction count
+// is within the inclusive configured range.
 std::vector<std::shared_ptr<Instruction>>
 generateRandomInstructions(const std::string& processName,
-                           int minCount, int maxCount);
+                           uint32_t minCount, uint32_t maxCount);
+
+// Deterministic overload used by tests and reproducible demonstrations.
+std::vector<std::shared_ptr<Instruction>>
+generateRandomInstructions(const std::string& processName,
+                           uint32_t minCount, uint32_t maxCount,
+                           uint32_t seed);

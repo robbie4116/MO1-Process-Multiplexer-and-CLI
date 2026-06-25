@@ -3,14 +3,88 @@
 #include "Utils.h"
 #include <iostream>
 #include <algorithm>
+#include <limits>
 #include <sstream>
+#include <stdexcept>
+
+namespace {
+
+uint64_t expandedInstructionCount(
+    const std::vector<std::shared_ptr<Instruction>>& instructions,
+    int loopDepth) {
+    uint64_t total = 0;
+    for (const auto& instruction : instructions) {
+        if (!instruction) {
+            throw std::invalid_argument("instruction cannot be null");
+        }
+
+        uint64_t contribution = 1;
+        if (instruction->type == InstrType::FOR) {
+            if (loopDepth >= 3) {
+                throw std::invalid_argument(
+                    "FOR instructions may be nested at most three levels");
+            }
+            if (instruction->forBody.empty() || instruction->forRepeats == 0) {
+                throw std::invalid_argument(
+                    "FOR requires a non-empty body and at least one repeat");
+            }
+            const uint64_t bodyCount =
+                expandedInstructionCount(instruction->forBody, loopDepth + 1);
+            if (bodyCount >
+                std::numeric_limits<uint64_t>::max() / instruction->forRepeats) {
+                throw std::length_error("expanded FOR instruction count overflow");
+            }
+            contribution = bodyCount * instruction->forRepeats;
+        }
+
+        if (total > std::numeric_limits<uint64_t>::max() - contribution) {
+            throw std::length_error("expanded instruction count overflow");
+        }
+        total += contribution;
+    }
+    return total;
+}
+
+void appendExpandedInstructions(
+    const std::vector<std::shared_ptr<Instruction>>& instructions,
+    int loopDepth,
+    std::vector<std::shared_ptr<Instruction>>& output) {
+    for (const auto& instruction : instructions) {
+        if (instruction->type != InstrType::FOR) {
+            output.push_back(instruction);
+            continue;
+        }
+
+        for (uint32_t repeat = 0; repeat < instruction->forRepeats; ++repeat) {
+            appendExpandedInstructions(
+                instruction->forBody, loopDepth + 1, output);
+        }
+    }
+}
+
+} // namespace
 
 Process::Process(std::string name_, int id_,
                  std::vector<std::shared_ptr<Instruction>> instructions)
     : name(std::move(name_)),
       id(id_),
-      totalInstructions(static_cast<int>(instructions.size())),
-      instructions_(std::move(instructions)) {}
+      instructions_(expandInstructions(instructions)) {
+    totalInstructions = static_cast<uint64_t>(instructions_.size());
+}
+
+std::vector<std::shared_ptr<Instruction>> Process::expandInstructions(
+    const std::vector<std::shared_ptr<Instruction>>& instructions) {
+    const uint64_t count = expandedInstructionCount(instructions, 0);
+    if (count > std::vector<std::shared_ptr<Instruction>>().max_size()) {
+        throw std::length_error(
+            "expanded instructions exceed addressable container capacity");
+    }
+
+    std::vector<std::shared_ptr<Instruction>> expanded;
+    expanded.reserve(static_cast<std::size_t>(count));
+    appendExpandedInstructions(instructions, 0, expanded);
+    return expanded;
+}
 
 std::string Process::getStartTimestamp() const {
     std::lock_guard<std::mutex> lk(metaMutex_);
@@ -64,8 +138,9 @@ void Process::clearDelay() {
 }
 
 bool Process::executeNextInstruction(int coreId_, uint64_t currentTick) {
-    int idx = currentInstruction.load();
+    uint64_t idx = currentInstruction.load();
     if (idx >= totalInstructions) {
+        variables_.clear();
         state.store(ProcState::FINISHED);
         return false;
     }
@@ -74,13 +149,17 @@ bool Process::executeNextInstruction(int coreId_, uint64_t currentTick) {
     state.store(ProcState::RUNNING);
     this->coreId.store(coreId_);
 
-    auto& instr = instructions_[idx];
+    auto& instr = instructions_[static_cast<std::size_t>(idx)];
     std::string ts = utils::getCurrentTimestamp();
 
     switch (instr->type) {
     case InstrType::PRINT: {
         std::ostringstream oss;
-        oss << "(" << ts << ") Core:" << coreId_ << " \"" << instr->printMsg << "\"";
+        oss << "(" << ts << ") Core:" << coreId_ << " \"" << instr->printMsg;
+        if (instr->printHasVar) {
+            oss << getOrDeclareVar(instr->printVar);
+        }
+        oss << "\"";
         appendLog(oss.str());
         break;
     }
@@ -108,12 +187,12 @@ bool Process::executeNextInstruction(int coreId_, uint64_t currentTick) {
         currentInstruction.fetch_add(1);
         return true;   // still alive, just sleeping
     case InstrType::FOR:
-        // FOR is unrolled at generation time for this implementation.
-        break;
+        throw std::logic_error("FOR must be expanded before execution");
     }
 
-    int next = currentInstruction.fetch_add(1) + 1;
+    uint64_t next = currentInstruction.fetch_add(1) + 1;
     if (next >= totalInstructions) {
+        variables_.clear();
         state.store(ProcState::FINISHED);
         return false;
     }

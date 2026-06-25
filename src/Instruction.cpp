@@ -1,6 +1,10 @@
 // src/Instruction.cpp
 #include "Instruction.h"
+#include <algorithm>
+#include <iterator>
+#include <mutex>
 #include <random>
+#include <stdexcept>
 #include <ctime>
 
 static std::mt19937& rng() {
@@ -8,15 +12,24 @@ static std::mt19937& rng() {
     return engine;
 }
 
-static int randInt(int lo, int hi) {          // inclusive both ends
-    return std::uniform_int_distribution<int>(lo, hi)(rng());
+static std::mutex& rngMutex() {
+    static std::mutex mutex;
+    return mutex;
 }
 
 // Build a PRINT instruction for "Hello world from <name>!"
-static std::shared_ptr<Instruction> makePrint(const std::string& name) {
+static std::shared_ptr<Instruction> makePrint(
+    const std::string& name,
+    std::mt19937& engine) {
     auto instr = std::make_shared<Instruction>();
     instr->type     = InstrType::PRINT;
-    instr->printMsg = "Hello world from " + name + "!";
+    if (std::uniform_int_distribution<int>(0, 3)(engine) == 0) {
+        instr->printMsg = "Value from: ";
+        instr->printHasVar = true;
+        instr->printVar = "x";
+    } else {
+        instr->printMsg = "Hello world from " + name + "!";
+    }
     return instr;
 }
 
@@ -35,46 +48,101 @@ static std::shared_ptr<Instruction> makeSleep(uint8_t ticks) {
     return instr;
 }
 
+static std::shared_ptr<Instruction> makeSimpleInstruction(
+    const std::string& processName,
+    std::mt19937& engine) {
+    const int choice = std::uniform_int_distribution<int>(0, 3)(engine);
+    if (choice == 0) return makePrint(processName, engine);
+    if (choice == 3) {
+        return makeSleep(static_cast<uint8_t>(
+            std::uniform_int_distribution<int>(1, 5)(engine)));
+    }
+
+    auto instr = std::make_shared<Instruction>();
+    instr->type = choice == 1 ? InstrType::ADD : InstrType::SUBTRACT;
+    instr->arithVar1 = "x";
+    instr->arithVar2 = "x";
+    instr->arithIsLit2 = false;
+    instr->arithLit3 = static_cast<uint16_t>(
+        choice == 1
+            ? std::uniform_int_distribution<int>(1, 10)(engine)
+            : std::uniform_int_distribution<int>(1, 5)(engine));
+    instr->arithIsLit3 = true;
+    return instr;
+}
+
+static std::vector<std::shared_ptr<Instruction>> generateBlock(
+    const std::string& processName,
+    uint32_t expandedBudget,
+    int loopDepth,
+    std::mt19937& engine) {
+    std::vector<std::shared_ptr<Instruction>> instructions;
+    uint32_t remaining = expandedBudget;
+
+    while (remaining > 0) {
+        const bool canGenerateFor = loopDepth < 3 && remaining >= 2;
+        const bool chooseFor = canGenerateFor &&
+            std::uniform_int_distribution<int>(0, 4)(engine) == 0;
+
+        if (!chooseFor) {
+            instructions.push_back(makeSimpleInstruction(processName, engine));
+            --remaining;
+            continue;
+        }
+
+        const uint32_t maxRepeats = std::min<uint32_t>(4, remaining);
+        const uint32_t repeats =
+            std::uniform_int_distribution<uint32_t>(2, maxRepeats)(engine);
+        const uint32_t maxBodyBudget =
+            std::min<uint32_t>(6, remaining / repeats);
+        const uint32_t bodyBudget =
+            std::uniform_int_distribution<uint32_t>(1, maxBodyBudget)(engine);
+
+        auto loop = std::make_shared<Instruction>();
+        loop->type = InstrType::FOR;
+        loop->forRepeats = repeats;
+        loop->forBody =
+            generateBlock(processName, bodyBudget, loopDepth + 1, engine);
+        instructions.push_back(std::move(loop));
+        remaining -= bodyBudget * repeats;
+    }
+    return instructions;
+}
+
+static std::vector<std::shared_ptr<Instruction>> generateWithEngine(
+    const std::string& processName,
+    uint32_t minCount,
+    uint32_t maxCount,
+    std::mt19937& engine) {
+    if (minCount == 0 || minCount > maxCount) {
+        throw std::invalid_argument("invalid instruction count range");
+    }
+
+    const uint32_t count =
+        std::uniform_int_distribution<uint32_t>(minCount, maxCount)(engine);
+    std::vector<std::shared_ptr<Instruction>> instructions;
+    instructions.push_back(makeDeclare("x", 0));
+    if (count > 1) {
+        auto generated = generateBlock(processName, count - 1, 0, engine);
+        instructions.insert(
+            instructions.end(),
+            std::make_move_iterator(generated.begin()),
+            std::make_move_iterator(generated.end()));
+    }
+    return instructions;
+}
+
 std::vector<std::shared_ptr<Instruction>>
 generateRandomInstructions(const std::string& processName,
-                           int minCount, int maxCount) {
-    int count = randInt(minCount, maxCount);
-    std::vector<std::shared_ptr<Instruction>> instrs;
-    instrs.reserve(count);
+                           uint32_t minCount, uint32_t maxCount) {
+    std::lock_guard<std::mutex> lock(rngMutex());
+    return generateWithEngine(processName, minCount, maxCount, rng());
+}
 
-    // Always start with a DECLARE so ADD/SUBTRACT have a variable to work with.
-    instrs.push_back(makeDeclare("x", 0));
-
-    for (int i = 1; i < count; ++i) {
-        int choice = randInt(0, 3);   // 0=PRINT, 1=ADD, 2=SUBTRACT, 3=SLEEP
-        switch (choice) {
-        case 0:
-            instrs.push_back(makePrint(processName));
-            break;
-        case 1: {
-            auto instr = std::make_shared<Instruction>();
-            instr->type      = InstrType::ADD;
-            instr->arithVar1 = "x";
-            instr->arithVar2 = "x"; instr->arithIsLit2 = false;
-            instr->arithLit3 = static_cast<uint16_t>(randInt(1, 10));
-            instr->arithIsLit3 = true;
-            instrs.push_back(instr);
-            break;
-        }
-        case 2: {
-            auto instr = std::make_shared<Instruction>();
-            instr->type      = InstrType::SUBTRACT;
-            instr->arithVar1 = "x";
-            instr->arithVar2 = "x"; instr->arithIsLit2 = false;
-            instr->arithLit3 = static_cast<uint16_t>(randInt(1, 5));
-            instr->arithIsLit3 = true;
-            instrs.push_back(instr);
-            break;
-        }
-        case 3:
-            instrs.push_back(makeSleep(static_cast<uint8_t>(randInt(1, 5))));
-            break;
-        }
-    }
-    return instrs;
+std::vector<std::shared_ptr<Instruction>>
+generateRandomInstructions(const std::string& processName,
+                           uint32_t minCount, uint32_t maxCount,
+                           uint32_t seed) {
+    std::mt19937 engine(seed);
+    return generateWithEngine(processName, minCount, maxCount, engine);
 }
