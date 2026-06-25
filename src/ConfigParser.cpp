@@ -3,6 +3,7 @@
 #include <fstream>
 #include <sstream>
 #include <iostream>
+#include <vector>
 
 bool ConfigParser::parse(const std::string& filename, Config& out) {
     std::vector<std::string> candidates = {

@@ -9,7 +9,7 @@
 #include <thread>
 #include <vector>
 #include <atomic>
-#include "Process.h"
+#include "SimProcess.h"
 #include "Config.h"
 
 struct CoreStatus {

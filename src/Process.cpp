@@ -1,5 +1,5 @@
 // src/Process.cpp
-#include "Process.h"
+#include "SimProcess.h"
 #include "Utils.h"
 #include <iostream>
 #include <algorithm>

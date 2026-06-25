@@ -41,7 +41,7 @@ MO1-Process-Multiplexer-and-CLI/
 │   ├── Config.h                # Config struct (populated from config.txt)
 │   ├── ConfigParser.h          # Parses config.txt into Config struct
 │   ├── Instruction.h           # Instruction types + random generator
-│   ├── Process.h               # Process state, in-memory logs, variable memory
+│   ├── SimProcess.h            # Process state, in-memory logs, variable memory
 │   ├── Scheduler.h             # Scheduler interface, CoreStatus, SchedulerSnapshot
 │   ├── ConsoleManager.h        # CLI state machine
 │   └── Utils.h                 # Shared helpers (timestamp, trim)

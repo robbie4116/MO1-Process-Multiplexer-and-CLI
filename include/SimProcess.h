@@ -1,4 +1,4 @@
-// include/Process.h
+// include/SimProcess.h
 #pragma once
 #include <atomic>
 #include <mutex>
