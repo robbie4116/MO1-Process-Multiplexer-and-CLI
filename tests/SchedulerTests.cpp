@@ -147,6 +147,21 @@ int maximumForDepth(
     return maximum;
 }
 
+void requireDefaultGeneratedPrints(
+    const std::vector<std::shared_ptr<Instruction>>& instructions,
+    const std::string& processName) {
+    for (const auto& instruction : instructions) {
+        if (instruction->type == InstrType::PRINT) {
+            require(!instruction->printHasVar,
+                    "generated PRINT unexpectedly referenced a variable");
+            require(instruction->printMsg ==
+                        "Hello world from " + processName + "!",
+                    "generated PRINT did not use the required default message");
+        }
+        requireDefaultGeneratedPrints(instruction->forBody, processName);
+    }
+}
+
 void testPrintCanAppendDeclaredVariable() {
     Process process("printer", 1, {
         declareInstruction("x", 42),
@@ -218,6 +233,15 @@ void testSeededGeneratorProducesExactProgramsWithFor() {
         foundFor = foundFor || containsFor(instructions);
     }
     require(foundFor, "random generator never produced a FOR instruction");
+}
+
+void testGeneratedPrintUsesRequiredDefaultMessage() {
+    const std::string processName = "default-message";
+    for (uint32_t seed = 1; seed <= 100; ++seed) {
+        const auto instructions =
+            generateRandomInstructions(processName, 40, 40, seed);
+        requireDefaultGeneratedPrints(instructions, processName);
+    }
 }
 
 void testAllCoresStayOccupiedWithRunnableBacklog() {
@@ -519,6 +543,8 @@ int main() {
         testForNestingDeeperThanThreeIsRejected, failures);
     run("seeded generator produces exact programs with FOR",
         testSeededGeneratorProducesExactProgramsWithFor, failures);
+    run("generated PRINT uses required default message",
+        testGeneratedPrintUsesRequiredDefaultMessage, failures);
     run("all cores stay occupied with runnable backlog",
         testAllCoresStayOccupiedWithRunnableBacklog, failures);
     run("snapshot running rows match assigned cores",

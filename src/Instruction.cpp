@@ -20,16 +20,10 @@ static std::mutex& rngMutex() {
 // Build a PRINT instruction for "Hello world from <name>!"
 static std::shared_ptr<Instruction> makePrint(
     const std::string& name,
-    std::mt19937& engine) {
+    std::mt19937&) {
     auto instr = std::make_shared<Instruction>();
     instr->type     = InstrType::PRINT;
-    if (std::uniform_int_distribution<int>(0, 3)(engine) == 0) {
-        instr->printMsg = "Value from: ";
-        instr->printHasVar = true;
-        instr->printVar = "x";
-    } else {
-        instr->printMsg = "Hello world from " + name + "!";
-    }
+    instr->printMsg = "Hello world from " + name + "!";
     return instr;
 }
 
