@@ -130,11 +130,7 @@ void Scheduler::mainLoop() {
                 generateBatchProcess();
             }
 
-            // 2. Dispatch free cores
-            if (cfg_.scheduler == "fcfs") dispatchFCFS();
-            else                           dispatchRR();
-
-            // 3. Execute one instruction per busy core
+            // 2. Execute one instruction per busy core
             for (int i = 0; i < cfg_.numCpu; ++i) {
                 auto& core = cores_[i];
                 if (!core.busy || !core.assigned) continue;
@@ -190,6 +186,10 @@ void Scheduler::mainLoop() {
                     }
                 }
             }
+
+            // 3. Dispatch free cores
+            if (cfg_.scheduler == "fcfs") dispatchFCFS();
+            else                           dispatchRR();
 
             cpuCycles_.fetch_add(1);
         }
