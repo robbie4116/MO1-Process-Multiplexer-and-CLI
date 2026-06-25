@@ -1,37 +1,51 @@
-// process.h - a single schedulable process and its PRINT-instruction log.
+// include/Process.h
 #pragma once
-
 #include <atomic>
 #include <mutex>
 #include <string>
+#include <vector>
+#include <memory>
+#include <unordered_map>
+#include <cstdint>
+#include "Instruction.h"
 
-enum class ProcState { READY, RUNNING, FINISHED };
+enum class ProcState { READY, RUNNING, SLEEPING, FINISHED };
 
 class Process {
 public:
-    Process(std::string name, int id, int totalInstructions);
+    Process(std::string name, int id,
+            std::vector<std::shared_ptr<Instruction>> instructions);
 
-    // Runs all PRINT instructions to completion on the given core
-    // (FCFS is non-preemptive, so this owns the core until it's done),
-    // writing each line to process_logs/<name>.txt as it goes.
-    void run(int coreId);
+    // Execute ONE instruction on the given core.
+    // Returns false if the process is finished.
+    // Sets sleepUntilTick_ if a SLEEP is encountered.
+    bool executeNextInstruction(int coreId, uint64_t currentTick);
 
-    // Thread-safe accessor for the timestamp this process first started running.
-    // Empty until the process has been dispatched to a core.
+    // True when SLEEP period has expired.
+    bool canResume(uint64_t currentTick) const;
+
+    // Thread-safe log access (for process-smi display).
+    std::vector<std::string> getLogs() const;
     std::string getStartTimestamp() const;
 
     const std::string name;
     const int id;
     const int totalInstructions;
 
-    // Safe to read from any thread without locking.
-    std::atomic<int> currentInstruction{0};
-    std::atomic<int> coreId{-1};
+    std::atomic<int>       currentInstruction{0};
+    std::atomic<int>       coreId{-1};
     std::atomic<ProcState> state{ProcState::READY};
 
 private:
+    uint16_t& getOrDeclareVar(const std::string& varName);
+    void appendLog(const std::string& entry);
     void setStartTimestamp(const std::string& ts);
 
-    mutable std::mutex metaMutex_; // guards startTimestamp_ (not atomic-safe)
-    std::string startTimestamp_;
+    std::vector<std::shared_ptr<Instruction>> instructions_;
+    std::unordered_map<std::string, uint16_t>  variables_;
+    std::vector<std::string>                    logs_;       // in-memory PRINT output
+    std::atomic<uint64_t>                       sleepUntilTick_{0};
+
+    mutable std::mutex metaMutex_;
+    std::string        startTimestamp_;
 };

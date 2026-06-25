@@ -1,33 +1,68 @@
+// src/Scheduler.cpp
 #include "Scheduler.h"
-
+#include "Instruction.h"
+#include "Utils.h"
 #include <algorithm>
+#include <chrono>
 #include <cstdio>
+#include <sstream>
+#include <iomanip>
 
-Scheduler::Scheduler(int numCores) : numCores_(numCores) {
-    cores_.resize(numCores_);
-    for (int i = 0; i < numCores_; ++i) {
-        cores_[i].id = i;
-    }
+Scheduler::Scheduler(const Config& cfg) : cfg_(cfg) {
+    cores_.resize(cfg_.numCpu);
+    quantumLeft_.resize(cfg_.numCpu, cfg_.quantumCycles);
+    coreDelayCounter_.resize(cfg_.numCpu, 0); 
+    for (int i = 0; i < cfg_.numCpu; ++i) cores_[i].id = i;
 }
 
-void Scheduler::createProcesses(int count, int instructionsPerProcess) {
+Scheduler::~Scheduler() { shutdown(); }
+
+std::string Scheduler::makeProcessName(int idx) {
+    std::ostringstream oss;
+    oss << "p" << std::setfill('0') << std::setw(2) << idx;
+    return oss.str();
+}
+
+int Scheduler::nextProcessIndex() const {
+    return nextProcIdx_.load();
+}
+
+void Scheduler::addProcess(std::shared_ptr<Process> proc) {
     std::lock_guard<std::mutex> lk(mutex_);
-    for (int i = 1; i <= count; ++i) {
-        char buf[16];
-        std::snprintf(buf, sizeof(buf), "screen_%02d", i);
-        auto proc = std::make_shared<Process>(buf, i, instructionsPerProcess);
-        allProcesses_.push_back(proc);
-        readyQueue_.push(proc);
-    }
+    allProcesses_.push_back(proc);
+    readyQueue_.push(proc);
+    cv_.notify_all();
 }
+
+std::shared_ptr<Process> Scheduler::findProcess(const std::string& name) const {
+    std::lock_guard<std::mutex> lk(mutex_);
+    for (auto& p : allProcesses_)
+        if (p->name == name) return p;
+    return nullptr;
+}
+
+bool Scheduler::allFinished() const {
+    std::lock_guard<std::mutex> lk(mutex_);
+    return !allProcesses_.empty() && finished_.size() == allProcesses_.size();
+}
+
+SchedulerSnapshot Scheduler::getSnapshot() const {
+    std::lock_guard<std::mutex> lk(mutex_);
+    SchedulerSnapshot snap;
+    snap.numCores  = cfg_.numCpu;
+    snap.cpuCycles = cpuCycles_.load();
+    for (auto& c : cores_) if (c.busy) snap.coresUsed++;
+    snap.allProcessesInOrder = allProcesses_;
+    snap.finishedInOrder     = finished_;
+    return snap;
+}
+
+void Scheduler::startBatchGeneration() { batchRunning_.store(true); }
+void Scheduler::stopBatchGeneration()  { batchRunning_.store(false); }
+bool Scheduler::isBatchRunning() const { return batchRunning_.load(); }
 
 void Scheduler::start() {
-    schedulerThread_ = std::thread(&Scheduler::schedulerLoop, this);
-    workerThreads_.reserve(numCores_);
-    for (int i = 0; i < numCores_; ++i) {
-        workerThreads_.emplace_back(&Scheduler::coreWorkerLoop, this, i);
-    }
-    cv_.notify_all(); // kick off scheduling immediately
+    mainThread_ = std::thread(&Scheduler::mainLoop, this);
 }
 
 void Scheduler::shutdown() {
@@ -36,85 +71,130 @@ void Scheduler::shutdown() {
         shutdownRequested_ = true;
     }
     cv_.notify_all();
-    if (schedulerThread_.joinable()) schedulerThread_.join();
-    for (auto& w : workerThreads_) {
-        if (w.joinable()) w.join();
+    if (mainThread_.joinable()) mainThread_.join();
+}
+
+// ── Batch generation ──────────────────────────────────────────────────────────
+void Scheduler::generateBatchProcess() {
+    int idx = nextProcIdx_.fetch_add(1);
+    std::string pname = makeProcessName(idx);
+    auto instrs = generateRandomInstructions(pname,
+                    static_cast<int>(cfg_.minIns),
+                    static_cast<int>(cfg_.maxIns));
+    auto proc = std::make_shared<Process>(pname, idx, std::move(instrs));
+    allProcesses_.push_back(proc);
+    readyQueue_.push(proc);
+}
+
+// ── FCFS dispatch ─────────────────────────────────────────────────────────────
+void Scheduler::dispatchFCFS() {
+    for (auto& core : cores_) {
+        if (core.busy || readyQueue_.empty()) continue;
+        auto proc = readyQueue_.front();
+        readyQueue_.pop();
+        proc->state.store(ProcState::RUNNING);
+        proc->coreId.store(core.id);
+        core.assigned = proc;
+        core.busy = true;
     }
 }
 
-bool Scheduler::allFinished() const {
-    std::lock_guard<std::mutex> lk(mutex_);
-    return finished_.size() == allProcesses_.size();
-}
-
-int Scheduler::totalProcessCount() const {
-    std::lock_guard<std::mutex> lk(mutex_);
-    return static_cast<int>(allProcesses_.size());
-}
-
-SchedulerSnapshot Scheduler::getSnapshot() const {
-    std::lock_guard<std::mutex> lk(mutex_);
-    SchedulerSnapshot snap;
-    snap.numCores = numCores_;
-    snap.coresUsed = 0;
-    for (auto& c : cores_) {
-        if (c.busy) snap.coresUsed++;
-    }
-    snap.allProcessesInOrder = allProcesses_;
-    snap.finishedInOrder = finished_;
-    return snap;
-}
-
-// Single dedicated thread. Implements FCFS: pops the ready queue in arrival
-// order and hands work to any free core.
-void Scheduler::schedulerLoop() {
-    while (true) {
-        std::unique_lock<std::mutex> lk(mutex_);
-        cv_.wait(lk, [&] {
-            if (shutdownRequested_) return true;
-            bool hasFreeCore = std::any_of(cores_.begin(), cores_.end(),
-                                            [](const CoreStatus& c) { return !c.busy; });
-            return !readyQueue_.empty() && hasFreeCore;
-        });
-
-        if (shutdownRequested_) return; // stop dispatching new work; running cores finish on their own
-
-        for (auto& core : cores_) {
-            if (readyQueue_.empty()) break;
-            if (core.busy) continue;
+// ── RR dispatch ───────────────────────────────────────────────────────────────
+void Scheduler::dispatchRR() {
+    for (int i = 0; i < cfg_.numCpu; ++i) {
+        auto& core = cores_[i];
+        if (!core.busy && !readyQueue_.empty()) {
             auto proc = readyQueue_.front();
             readyQueue_.pop();
+            proc->state.store(ProcState::RUNNING);
             proc->coreId.store(core.id);
             core.assigned = proc;
-            core.busy = true;
+            core.busy     = true;
+            quantumLeft_[i] = cfg_.quantumCycles;
         }
-        lk.unlock();
-        cv_.notify_all(); // wake the worker threads that just got an assignment
     }
 }
 
-// One persistent thread per CPU core. Waits for the scheduler to hand it a
-// process, runs that process to completion, then waits for the next job.
-void Scheduler::coreWorkerLoop(int coreId) {
+// ── Main scheduling loop ──────────────────────────────────────────────────────
+void Scheduler::mainLoop() {
     while (true) {
-        std::shared_ptr<Process> proc;
-        {
-            std::unique_lock<std::mutex> lk(mutex_);
-            cv_.wait(lk, [&] {
-                return shutdownRequested_ || cores_[coreId].assigned != nullptr;
-            });
-            if (shutdownRequested_ && cores_[coreId].assigned == nullptr) return;
-            proc = cores_[coreId].assigned;
-        }
-
-        proc->run(coreId); // executes all PRINT instructions, writes its own log file
-
         {
             std::lock_guard<std::mutex> lk(mutex_);
-            cores_[coreId].assigned = nullptr;
-            cores_[coreId].busy = false;
-            finished_.push_back(proc);
+            if (shutdownRequested_) return;
+
+            uint64_t tick = cpuCycles_.load();
+
+            // 1. Batch generation
+            if (batchRunning_ && cfg_.batchProcessFreq > 0 &&
+                tick % cfg_.batchProcessFreq == 0) {
+                generateBatchProcess();
+            }
+
+            // 2. Dispatch free cores
+            if (cfg_.scheduler == "fcfs") dispatchFCFS();
+            else                           dispatchRR();
+
+            // 3. Execute one instruction per busy core
+            for (int i = 0; i < cfg_.numCpu; ++i) {
+                auto& core = cores_[i];
+                if (!core.busy || !core.assigned) continue;
+                auto& proc = core.assigned;
+
+                // Handle SLEEP
+                if (proc->state.load() == ProcState::SLEEPING) {
+                    if (proc->canResume(tick)) {
+                        proc->state.store(ProcState::RUNNING);
+                    } else {
+                        // Preempt sleeping process — put back in ready queue
+                        // so other processes can run.
+                        readyQueue_.push(proc);
+                        core.assigned = nullptr;
+                        core.busy     = false;
+                        continue;
+                    }
+                }
+
+                // delay-per-exec: skip execution for `delayPerExec` ticks
+                // (simple busy-wait: process holds the core but does nothing)
+                // Track per-core delay separately if needed; for simplicity,
+                // treat delayPerExec as 0 here and always execute.
+                // (Full implementation: add a per-core delay counter.)
+
+                if (coreDelayCounter_[i] > 0) {
+                    // Busy-wait: process holds the core but executes nothing this tick.
+                    --coreDelayCounter_[i];
+                } else {
+                    bool alive = proc->executeNextInstruction(i, tick);
+
+                    if (!alive || proc->state.load() == ProcState::FINISHED) {
+                        proc->state.store(ProcState::FINISHED);
+                        finished_.push_back(proc);
+                        core.assigned = nullptr;
+                        core.busy     = false;
+                        coreDelayCounter_[i] = 0;               // reset on finish
+                    } else if (cfg_.scheduler == "rr") {
+                        if (--quantumLeft_[i] == 0) {
+                            proc->state.store(ProcState::READY);
+                            proc->coreId.store(-1);
+                            readyQueue_.push(proc);
+                            core.assigned   = nullptr;
+                            core.busy       = false;
+                            quantumLeft_[i] = cfg_.quantumCycles;
+                            coreDelayCounter_[i] = 0;           // reset on preempt
+                        } else {
+                            coreDelayCounter_[i] = cfg_.delayPerExec; // arm delay for next instr
+                        }
+                    } else {
+                        // FCFS
+                        coreDelayCounter_[i] = cfg_.delayPerExec;     // arm delay for next instr
+                    }
+                }
+            }
+
+            cpuCycles_.fetch_add(1);
         }
-        cv_.notify_all(); // wake the scheduler: a core just freed up
+        // Small sleep to avoid pegging the CPU 100% on the host machine.
+        // Remove / reduce if benchmarking scheduler throughput.
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
     }
 }

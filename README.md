@@ -1,23 +1,436 @@
-# MO1-Process-Multiplexer-and-CLI
+# CSOPESY OS Emulator — MO1: Process Multiplexer and CLI
 
-OS Emulator — CSOPESY
-Group members:
-Cumti
-Dulatre
-Hong
-Pineda
+A terminal-based OS emulator written in C++17 that simulates a CPU process scheduler, a command-line multiplexer (inspired by the Linux `screen` command), and a configurable multi-core CPU scheduler supporting both **First-Come First-Served (FCFS)** and **Round-Robin (RR)** algorithms.
 
-Requirements:
-  - CMake 3.16+
-  - C++17 compiler (clang++ on Mac, MSVC on Windows)
 
-Build instructions:
-  1. mkdir build && cd build
-  2. cmake ..
-  3. cmake --build .
+## Team Members
 
-Run instructions (Mac/Linux):
-  ./csopesy
+| Name |
+|------|
+| Cumti |
+| Dulatre |
+| Hong |
+| Pineda |
 
-Run instructions (Windows):
-  .\csopesy.exe
+---
+
+## Features
+
+- Interactive CLI with command recognition and an `initialize` gate
+- Linux-style `screen` multiplexer — create, list, and re-attach to processes
+- Configurable multi-core CPU scheduler (FCFS and Round-Robin)
+- Randomized process instruction generation (PRINT, DECLARE, ADD, SUBTRACT, SLEEP, FOR)
+- In-memory per-process logs viewable via `process-smi`
+- `scheduler-start` / `scheduler-stop` for continuous batch process generation
+- `report-util` command that writes a CPU utilization snapshot to `csopesy-log.txt`
+- `delay-per-exec` busy-wait support
+- Thread-safe design — scheduler, workers, and UI run concurrently without data races
+- Configurable via `config.txt` — no recompile needed to change parameters
+
+---
+
+## Project Structure
+
+```
+MO1-Process-Multiplexer-and-CLI/
+├── config.txt                  # Runtime configuration (read by `initialize`)
+├── CMakeLists.txt              # CMake build definition
+├── Makefile                    # Alternative GNU Make build
+│
+├── include/
+│   ├── Config.h                # Config struct (populated from config.txt)
+│   ├── ConfigParser.h          # Parses config.txt into Config struct
+│   ├── Instruction.h           # Instruction types + random generator
+│   ├── Process.h               # Process state, in-memory logs, variable memory
+│   ├── Scheduler.h             # Scheduler interface, CoreStatus, SchedulerSnapshot
+│   ├── ConsoleManager.h        # CLI state machine
+│   └── Utils.h                 # Shared helpers (timestamp, trim)
+│
+└── src/
+    ├── main.cpp                # Entry point — creates and runs ConsoleManager
+    ├── ConfigParser.cpp        # config.txt reader implementation
+    ├── Instruction.cpp         # Instruction execution + random generation
+    ├── Process.cpp             # Per-instruction execution, variable map, log storage
+    ├── Scheduler.cpp           # Main scheduling loop, FCFS/RR dispatch, batch generation
+    ├── ConsoleManager.cpp      # All CLI command handlers and screen sub-shell
+    └── Utils.cpp               # getCurrentTimestamp(), trim()
+```
+
+---
+
+## Requirements
+
+| Requirement | Version |
+|---|---|
+| C++ standard | C++17 or newer |
+| CMake | 3.16 or newer |
+| Compiler (Linux / macOS) | `g++` or `clang++` with C++17 support |
+| Compiler (Windows) | MSVC 2019+ or MinGW-w64 |
+| POSIX Threads | Provided by the OS (Linux/macOS); use `-pthread` |
+
+---
+
+## Build Instructions
+
+### Option A — CMake (recommended, cross-platform)
+
+```bash
+# From the project root (where CMakeLists.txt lives)
+mkdir -p build
+cd build
+cmake ..
+cmake --build .
+```
+
+The binary is output as `build/csopesy` (Linux/macOS) or `build/csopesy.exe` (Windows).
+
+### Option B — GNU Make (Linux / macOS)
+
+```bash
+# From the project root
+make
+```
+
+The binary is output as `csopesy_scheduler` in the project root.
+
+### Option C — Manual (one-liner)
+
+```bash
+g++ -std=c++17 -O2 -Wall -pthread \
+    src/main.cpp src/ConfigParser.cpp src/Instruction.cpp \
+    src/Process.cpp src/Scheduler.cpp src/ConsoleManager.cpp src/Utils.cpp \
+    -Iinclude -o csopesy
+```
+
+### Clean
+
+```bash
+# CMake
+cd build && cmake --build . --target clean
+
+# Make
+make clean
+```
+
+---
+
+## Running the Emulator
+
+Always run the binary from the **project root** (the folder that contains `config.txt`), not from inside `build/`:
+
+```bash
+# Linux / macOS
+./build/csopesy
+
+# Windows
+.\build\csopesy.exe
+
+# Or if built with Make
+./csopesy_scheduler
+```
+
+> **Why from the project root?** The `initialize` command looks for `config.txt` relative to the working directory. Running from inside `build/` makes it look in the wrong place. The `ConfigParser` also checks `../config.txt` as a fallback, but running from the project root is the cleanest approach.
+
+---
+
+## Configuration — config.txt
+
+The `config.txt` file uses a simple space-separated format (`key value`). It is read when the user types `initialize`.
+
+```
+num-cpu 4
+scheduler "rr"
+quantum-cycles 5
+batch-process-freq 1
+min-ins 1000
+max-ins 2000
+delay-per-exec 0
+```
+
+### Parameter Reference
+
+| Parameter | Type | Range | Description |
+|---|---|---|---|
+| `num-cpu` | int | 1 – 128 | Number of CPU cores available to the scheduler |
+| `scheduler` | string | `"fcfs"` or `"rr"` | Scheduling algorithm to use |
+| `quantum-cycles` | uint32 | 1 – 2³² | Time slice per process per core (RR only; ignored by FCFS) |
+| `batch-process-freq` | uint32 | 1 – 2³² | How often (in CPU ticks) a new process is auto-generated by `scheduler-start` |
+| `min-ins` | uint32 | 1 – 2³² | Minimum number of instructions per generated process |
+| `max-ins` | uint32 | 1 – 2³² | Maximum number of instructions per generated process |
+| `delay-per-exec` | uint32 | 0 – 2³² | CPU ticks to busy-wait between each instruction. `0` = execute one instruction per tick |
+
+### Notes on Parameters
+
+- `quantum-cycles` has no effect when `scheduler "fcfs"` is set.
+- Setting `batch-process-freq 1` generates a new process every single CPU tick — use a higher value (e.g. `10`) to slow down batch generation.
+- `delay-per-exec 0` is the fastest setting. Higher values slow down instruction execution while keeping the process on its core (busy-wait, not sleep).
+- `min-ins` must be ≤ `max-ins`. If they are equal, every process will have exactly that many instructions.
+
+---
+
+## CLI Commands Reference
+
+### Before `initialize`
+
+Only two commands are recognized before the emulator is initialized:
+
+| Command | Description |
+|---|---|
+| `initialize` | Reads `config.txt`, sets up the scheduler, and enables all other commands |
+| `exit` | Terminates the emulator immediately |
+
+Any other command typed before `initialize` will print: `Please run 'initialize' first.`
+
+---
+
+### After `initialize`
+
+#### `screen -s <name>`
+
+Creates a new process with the given name and enters its screen.
+
+```
+root:\> screen -s myprocess
+```
+
+- Generates a random set of instructions (between `min-ins` and `max-ins`) for the process.
+- Immediately adds the process to the scheduler's ready queue.
+- Switches the display to the process screen where you can use `process-smi` and `exit`.
+
+#### `screen -r <name>`
+
+Re-attaches to an existing running process by name.
+
+```
+root:\> screen -r p01
+```
+
+- If the process is not found or has already finished, prints: `Process <name> not found.`
+
+#### `screen -ls`
+
+Lists CPU utilization and all currently running and finished processes.
+
+```
+root:\> screen -ls
+
+CPU utilization: 100%
+Cores used: 4
+Cores available: 0
+
+--------------------------------------
+Running processes:
+p05   (01/18/2024 09:15:22AM)   Core: 0    1235 / 5876
+p06   (01/18/2024 09:17:22AM)   Core: 1    3 / 5876
+
+Finished processes:
+p01   (01/18/2024 09:00:21AM)   Finished    5876 / 5876
+p02   (01/18/2024 09:00:22AM)   Finished    5876 / 5876
+--------------------------------------
+```
+
+#### `scheduler-start`
+
+Starts continuous automatic process generation. Every `batch-process-freq` CPU ticks, a new process named `p01`, `p02`, `p03`, ... is created and enqueued.
+
+```
+root:\> scheduler-start
+Scheduler started.
+```
+
+#### `scheduler-stop`
+
+Stops automatic process generation. Processes already in the queue or running are not affected.
+
+```
+root:\> scheduler-stop
+Scheduler stopped.
+```
+
+#### `report-util`
+
+Generates the same output as `screen -ls` and saves it to `csopesy-log.txt` in the current working directory.
+
+```
+root:\> report-util
+Report generated at csopesy-log.txt
+```
+
+#### `exit`
+
+Stops the scheduler and all worker threads cleanly, then terminates the emulator.
+
+```
+root:\> exit
+Goodbye.
+```
+
+---
+
+### Inside a Process Screen (`screen -s` or `screen -r`)
+
+Once inside a process screen, only two commands are available:
+
+#### `process-smi`
+
+Displays a snapshot of the process's current state and its in-memory PRINT logs.
+
+```
+Process name: p01
+ID: 1
+Logs:
+(01/18/2024 09:15:22AM) Core:0 "Hello world from p01!"
+(01/18/2024 09:15:28AM) Core:0 "Hello world from p01!"
+
+Current instruction line: 153
+Lines of code: 1240
+```
+
+If the process has already finished:
+
+```
+Process name: p01
+ID: 1
+Logs:
+(01/18/2024 09:15:22AM) Core:0 "Hello world from p01!"
+...
+
+Finished!
+```
+
+#### `exit`
+
+Returns to the main menu console. The process continues running in the background.
+
+```
+root:\> exit
+```
+
+---
+
+## Process Instructions
+
+When a process is created (via `screen -s` or `scheduler-start`), it is assigned a randomized list of instructions. The following instruction types are supported:
+
+| Instruction | Syntax | Description |
+|---|---|---|
+| `PRINT` | `PRINT(msg)` | Appends a log entry to the process's in-memory log. Only visible via `process-smi`. Default message: `"Hello world from <process_name>!"` |
+| `DECLARE` | `DECLARE(var, value)` | Declares a `uint16_t` variable named `var` with initial `value`. Variables are stored per-process and released when the process finishes. |
+| `ADD` | `ADD(var1, var2, var3)` | `var1 = var2 + var3`. Operands can be variable names or literal `uint16_t` values. Undeclared variables auto-initialize to 0. Result is clamped to `[0, 65535]`. |
+| `SUBTRACT` | `SUBTRACT(var1, var2, var3)` | `var1 = var2 - var3`. Result is clamped at 0 (no underflow). |
+| `SLEEP` | `SLEEP(X)` | Suspends the process for `X` CPU ticks and relinquishes its core. Resumes automatically after the sleep period. |
+| `FOR` | `FOR([instructions], repeats)` | Loops over a block of instructions `repeats` times. Can be nested up to 3 levels deep. |
+
+### Variable Rules
+
+- All variables are `uint16_t` (range 0 – 65535).
+- Variables are scoped to the process — they do not persist after the process finishes.
+- Using a variable before declaring it is valid; it is automatically declared with value `0`.
+- Values are clamped: `ADD` clamps at `65535`, `SUBTRACT` clamps at `0`.
+
+---
+
+## Architecture and Threading Model
+
+```
+Main Thread (ConsoleManager)
+│
+│  reads user input, calls scheduler methods, renders output
+│
+└── Scheduler Main Loop Thread
+        │
+        │  one tick per iteration:
+        │    1. generate batch process (if scheduler-start is active)
+        │    2. dispatch free cores (FCFS or RR)
+        │    3. execute one instruction per busy core
+        │    4. handle SLEEP relinquish and RR quantum expiry
+        │    5. move finished processes to the finished list
+        │    6. increment cpuCycles counter
+        │
+        └── (all cores run inside this single loop — no per-core threads)
+```
+
+### Shared State and Thread Safety
+
+All scheduling state (ready queue, core assignments, process list, finished list, CPU cycle counter) lives inside `Scheduler` and is protected by a single `std::mutex`. The main thread only reads scheduler state through `getSnapshot()`, which acquires the lock once and returns a fully consistent copy — so the CLI never races with the scheduler loop.
+
+Each `Process` has its own `std::mutex` guarding its start timestamp and in-memory log vector, plus `std::atomic` counters for the current instruction index, core ID, and state — so `process-smi` can safely read live progress from the main thread while the scheduler is writing to it.
+
+---
+
+## Scheduler Algorithms
+
+### FCFS — First-Come First-Served
+
+- Non-preemptive: once a process is dispatched to a core, it holds that core until all its instructions finish.
+- Processes are dispatched in arrival order (the order they were added to the ready queue).
+- `quantum-cycles` is ignored.
+
+### RR — Round-Robin
+
+- Preemptive: each process is given a time slice of `quantum-cycles` CPU ticks on its core.
+- When the quantum expires, the process is preempted, its state is set back to `READY`, and it is pushed to the back of the ready queue.
+- The core is immediately made available for the next waiting process.
+- `SLEEP` also causes a voluntary relinquish: the process is pushed back to the ready queue and only re-dispatched once its sleep period has elapsed.
+
+### CPU Ticks
+
+The CPU tick is an integer counter that increments once per iteration of the scheduler loop:
+
+```cpp
+int cpuCycles = 0;
+while (os_is_running) {
+    cpuCycles++;
+}
+```
+
+All timing — `quantum-cycles`, `batch-process-freq`, `delay-per-exec`, and `SLEEP` — is measured in these ticks.
+
+---
+
+## Sample Session
+
+```
+root:\> initialize
+Initialized successfully.
+
+root:\> scheduler-start
+Scheduler started.
+
+root:\> screen -ls
+
+CPU utilization: 75%
+Cores used: 3
+Cores available: 1
+
+--------------------------------------
+Running processes:
+p01   (06/25/2026 10:00:01AM)   Core: 0    412 / 1500
+p02   (06/25/2026 10:00:01AM)   Core: 1    88 / 1200
+p03   (06/25/2026 10:00:02AM)   Core: 2    5 / 1800
+
+Finished processes:
+--------------------------------------
+
+root:\> screen -r p01
+
+Process name: p01
+ID: 1
+Logs:
+(06/25/2026 10:00:01AM) Core:0 "Hello world from p01!"
+(06/25/2026 10:00:01AM) Core:0 "Hello world from p01!"
+
+Current instruction line: 450
+Lines of code: 1500
+
+root:\> exit
+
+root:\> scheduler-stop
+Scheduler stopped.
+
+root:\> report-util
+Report generated at csopesy-log.txt
+
+root:\> exit
+Goodbye.
+```

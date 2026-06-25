@@ -1,15 +1,14 @@
-// config.h - tunable constants for the homework test case.
+// include/Config.h
 #pragma once
-
 #include <string>
+#include <cstdint>
 
-namespace config {
-
-constexpr int NUM_CORES = 4;                  // Requirement #4: declare 4 cores
-constexpr int NUM_PROCESSES = 10;             // Test case: 10 processes
-constexpr int INSTRUCTIONS_PER_PROCESS = 100; // Test case: 100 print commands each
-constexpr int INSTRUCTION_DELAY_MS = 15;      // Simulated per-instruction CPU time
-
-inline const std::string OUTPUT_DIR = "process_logs";
-
-} // namespace config
+struct Config {
+    int      numCpu          = 4;
+    std::string scheduler    = "rr";
+    uint32_t quantumCycles   = 5;
+    uint32_t batchProcessFreq= 1;
+    uint32_t minIns          = 1000;
+    uint32_t maxIns          = 2000;
+    uint32_t delayPerExec    = 0;
+};
