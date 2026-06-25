@@ -24,6 +24,11 @@ public:
     // True when SLEEP period has expired.
     bool canResume(uint64_t currentTick) const;
 
+    // delay-per-exec busy-wait state follows the process across preemption.
+    bool consumeDelayTick();
+    void armDelay(uint32_t ticks);
+    void clearDelay();
+
     // Thread-safe log access (for process-smi display).
     std::vector<std::string> getLogs() const;
     std::string getStartTimestamp() const;
@@ -45,6 +50,7 @@ private:
     std::unordered_map<std::string, uint16_t>  variables_;
     std::vector<std::string>                    logs_;       // in-memory PRINT output
     std::atomic<uint64_t>                       sleepUntilTick_{0};
+    std::atomic<uint32_t>                       delayTicksRemaining_{0};
 
     mutable std::mutex metaMutex_;
     std::string        startTimestamp_;

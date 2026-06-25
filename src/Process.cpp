@@ -44,6 +44,25 @@ bool Process::canResume(uint64_t currentTick) const {
     return currentTick >= sleepUntilTick_.load();
 }
 
+bool Process::consumeDelayTick() {
+    uint32_t remaining = delayTicksRemaining_.load();
+    while (remaining > 0) {
+        if (delayTicksRemaining_.compare_exchange_weak(
+                remaining, remaining - 1)) {
+            return true;
+        }
+    }
+    return false;
+}
+
+void Process::armDelay(uint32_t ticks) {
+    delayTicksRemaining_.store(ticks);
+}
+
+void Process::clearDelay() {
+    delayTicksRemaining_.store(0);
+}
+
 bool Process::executeNextInstruction(int coreId_, uint64_t currentTick) {
     int idx = currentInstruction.load();
     if (idx >= totalInstructions) {

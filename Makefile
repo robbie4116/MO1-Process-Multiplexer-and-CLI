@@ -1,11 +1,24 @@
 CXX = g++
 CXXFLAGS = -std=c++17 -O2 -Wall -pthread -MMD -MP
-TARGET = csopesy_scheduler
 
-SRCS = main.cpp Process.cpp Scheduler.cpp ConsoleManager.cpp Utils.cpp
-SRCS = src/main.cpp src/Process.cpp src/Scheduler.cpp src/ConsoleManager.cpp src/Utils.cpp
+ifeq ($(OS),Windows_NT)
+TARGET = csopesy_scheduler.exe
+CLEAN = cmd /C "del /F /Q $(TARGET) src\*.o src\*.d 2>NUL & if exist process_logs rmdir /S /Q process_logs"
+else
+TARGET = csopesy_scheduler
+CLEAN = rm -f $(TARGET) $(OBJS) $(DEPS) && rm -rf process_logs
+endif
+
+SRCS = src/main.cpp \
+       src/ConfigParser.cpp \
+       src/ConsoleManager.cpp \
+       src/Instruction.cpp \
+       src/Process.cpp \
+       src/ProcessTable.cpp \
+       src/Scheduler.cpp \
+       src/Utils.cpp
 OBJS = $(SRCS:.cpp=.o)
-DEPS = $(SRCS:.cpp:.d)
+DEPS = $(SRCS:.cpp=.d)
 
 all: $(TARGET)
 
@@ -19,8 +32,7 @@ run: $(TARGET)
 	./$(TARGET)
 
 clean:
-	rm -f $(TARGET) $(OBJS) $(DEPS)
-	rm -rf process_logs
+	$(CLEAN)
 
 -include $(DEPS)
 

@@ -28,16 +28,6 @@ static std::shared_ptr<Instruction> makeDeclare(const std::string& var, uint16_t
     return instr;
 }
 
-static std::shared_ptr<Instruction> makeAdd(
-    const std::string& v1, const std::string& v2, const std::string& v3) {
-    auto instr = std::make_shared<Instruction>();
-    instr->type     = InstrType::ADD;
-    instr->arithVar1 = v1;
-    instr->arithVar2 = v2;  instr->arithIsLit2 = false;
-    instr->arithVar3 = v3;  instr->arithIsLit3 = false;
-    return instr;
-}
-
 static std::shared_ptr<Instruction> makeSleep(uint8_t ticks) {
     auto instr = std::make_shared<Instruction>();
     instr->type       = InstrType::SLEEP;

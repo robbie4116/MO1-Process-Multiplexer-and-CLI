@@ -67,24 +67,21 @@ void ConsoleManager::printScreenLsOutput(const SchedulerSnapshot& snap,
     out << "--------------------------------------\n";
 
     out << "Running processes:\n";
-    for (auto& p : snap.allProcessesInOrder) {
-        auto st = p->state.load();
-        if (st == ProcState::RUNNING || st == ProcState::SLEEPING) {
-            out << std::left << std::setw(12) << p->name
-                << " (" << p->getStartTimestamp() << ")"
-                << "   Core: " << p->coreId.load()
-                << "    "      << p->currentInstruction.load()
-                << " / "       << p->totalInstructions << "\n";
-        }
+    for (const auto& p : snap.runningProcesses) {
+        out << std::left << std::setw(12) << p.name
+            << " (" << p.startTimestamp << ")"
+            << "   Core: " << p.coreId
+            << "    "      << p.currentInstruction
+            << " / "       << p.totalInstructions << "\n";
     }
 
     out << "\nFinished processes:\n";
-    for (auto& p : snap.finishedInOrder) {
-        out << std::left << std::setw(12) << p->name
-            << " (" << p->getStartTimestamp() << ")"
+    for (const auto& p : snap.finishedProcesses) {
+        out << std::left << std::setw(12) << p.name
+            << " (" << p.startTimestamp << ")"
             << "   Finished"
-            << "    " << p->totalInstructions
-            << " / "  << p->totalInstructions << "\n";
+            << "    " << p.totalInstructions
+            << " / "  << p.totalInstructions << "\n";
     }
     out << "--------------------------------------\n\n";
 }
@@ -155,7 +152,7 @@ void ConsoleManager::handleScreen(const std::string& args) {
         if (scheduler_->findProcess(pname)) {
             std::cout << "Process '" << pname << "' already exists.\n"; return;
         }
-        int idx = scheduler_->nextProcessIndex();
+        int idx = scheduler_->allocateProcessId();
         auto instrs = generateRandomInstructions(pname,
                         static_cast<int>(config_.minIns),
                         static_cast<int>(config_.maxIns));
@@ -167,11 +164,8 @@ void ConsoleManager::handleScreen(const std::string& args) {
         iss >> pname;
         if (pname.empty()) { std::cout << "Usage: screen -r <name>\n"; return; }
         auto proc = scheduler_->findProcess(pname);
-        if (!proc) {
+        if (!proc || proc->state.load() == ProcState::FINISHED) {
             std::cout << "Process " << pname << " not found.\n"; return;
-        }
-        if (proc->state.load() == ProcState::FINISHED) {
-            std::cout << "Process " << pname << " has already finished.\n"; return;
         }
         enterProcessScreen(proc);
 
