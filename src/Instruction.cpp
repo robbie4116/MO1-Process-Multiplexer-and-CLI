@@ -17,21 +17,12 @@ static std::mutex& rngMutex() {
     return mutex;
 }
 
-// Build a PRINT instruction for "Hello world from <name>!"
 static std::shared_ptr<Instruction> makePrint(
     const std::string& name,
     std::mt19937&) {
     auto instr = std::make_shared<Instruction>();
     instr->type     = InstrType::PRINT;
     instr->printMsg = "Hello world from " + name + "!";
-    return instr;
-}
-
-static std::shared_ptr<Instruction> makeDeclare(const std::string& var, uint16_t val) {
-    auto instr = std::make_shared<Instruction>();
-    instr->type      = InstrType::DECLARE;
-    instr->declVar   = var;
-    instr->declValue = val;
     return instr;
 }
 
@@ -114,16 +105,7 @@ static std::vector<std::shared_ptr<Instruction>> generateWithEngine(
 
     const uint32_t count =
         std::uniform_int_distribution<uint32_t>(minCount, maxCount)(engine);
-    std::vector<std::shared_ptr<Instruction>> instructions;
-    instructions.push_back(makeDeclare("x", 0));
-    if (count > 1) {
-        auto generated = generateBlock(processName, count - 1, 0, engine);
-        instructions.insert(
-            instructions.end(),
-            std::make_move_iterator(generated.begin()),
-            std::make_move_iterator(generated.end()));
-    }
-    return instructions;
+    return generateBlock(processName, count, 0, engine);
 }
 
 std::vector<std::shared_ptr<Instruction>>

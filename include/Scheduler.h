@@ -1,5 +1,6 @@
 // include/Scheduler.h
 #pragma once
+#include <chrono>
 #include <condition_variable>
 #include <functional>
 #include <memory>
@@ -90,7 +91,7 @@ private:
     std::atomic<bool>     batchRunning_{false};
     std::atomic<int>      nextProcessId_{1};
     int                   nextBatchNameIndex_ = 1;
-    uint64_t              nextBatchGenerationTick_ = 0;
+    std::chrono::steady_clock::time_point nextBatchGenerationAt_{};
 
     bool shutdownRequested_ = false;
     std::thread mainThread_;

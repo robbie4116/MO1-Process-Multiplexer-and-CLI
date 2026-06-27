@@ -95,8 +95,9 @@ void Scheduler::startBatchGeneration() {
     std::lock_guard<std::mutex> lk(mutex_);
     if (batchRunning_.load()) return;
     batchRunning_.store(true);
-    nextBatchGenerationTick_ =
-        cpuCycles_.load() + static_cast<uint64_t>(cfg_.batchProcessFreq);
+    nextBatchGenerationAt_ =
+        std::chrono::steady_clock::now() +
+        std::chrono::seconds(cfg_.batchProcessFreq);
 }
 
 void Scheduler::stopBatchGeneration() {
@@ -209,8 +210,10 @@ void Scheduler::mainLoop() {
             // 1. Wake blocked processes whose SLEEP interval has elapsed.
             wakeSleepingProcesses(tick);
 
-            // 2. Batch generation is relative to scheduler-start.
-            if (batchRunning_.load() && tick >= nextBatchGenerationTick_) {
+            // 2. Batch generation is relative to scheduler-start and uses
+            // wall-clock seconds so prompt wait times map to visible output.
+            const auto now = std::chrono::steady_clock::now();
+            if (batchRunning_.load() && now >= nextBatchGenerationAt_) {
                 try {
                     generateBatchProcess();
                 } catch (const std::exception& error) {
@@ -218,8 +221,8 @@ void Scheduler::mainLoop() {
                     std::cerr << "Error: batch process generation stopped: "
                               << error.what() << '\n';
                 }
-                nextBatchGenerationTick_ =
-                    tick + static_cast<uint64_t>(cfg_.batchProcessFreq);
+                nextBatchGenerationAt_ =
+                    now + std::chrono::seconds(cfg_.batchProcessFreq);
             }
 
             // 3. Dispatch free cores.

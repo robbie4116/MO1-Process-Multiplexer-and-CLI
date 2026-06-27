@@ -230,9 +230,13 @@ void ConsoleManager::run() {
         // ── Recognized commands ────────────────────────────────────────────
         if (line == "initialize") {
             std::cout << "Already initialized.\n";
+        } else if (line == "screen-ls") {
+            handleScreenLs();
         } else if (line.rfind("screen", 0) == 0) {
             std::string args = line.size() > 7 ? line.substr(7) : "";
             handleScreen(utils::trim(args));
+        } else if (line == "scheduler-test") {
+            handleSchedulerStart();
         } else if (line == "scheduler-start") {
             handleSchedulerStart();
         } else if (line == "scheduler-stop") {

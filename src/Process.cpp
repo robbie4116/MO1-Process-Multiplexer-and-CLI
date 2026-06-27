@@ -69,6 +69,9 @@ Process::Process(std::string name_, int id_,
     : name(std::move(name_)),
       id(id_),
       instructions_(expandInstructions(instructions)) {
+    variables_["x"] = 0;
+    variables_["y"] = 0;
+    variables_["z"] = 0;
     totalInstructions = static_cast<uint64_t>(instructions_.size());
 }
 
