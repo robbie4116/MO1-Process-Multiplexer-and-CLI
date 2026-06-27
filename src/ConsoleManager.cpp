@@ -10,9 +10,28 @@
 #include <sstream>
 #include <string>
 
+#ifdef _WIN32
+#include <io.h>
+#else
+#include <unistd.h>
+#endif
+
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
+namespace {
+
+bool isInteractiveOutput() {
+#ifdef _WIN32
+    return _isatty(_fileno(stdout)) != 0;
+#else
+    return isatty(fileno(stdout)) != 0;
+#endif
+}
+
+} // namespace
+
 void ConsoleManager::clearScreen() {
+    if (!isInteractiveOutput()) return;
 #ifdef _WIN32
     system("cls");
 #else
