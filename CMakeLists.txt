@@ -8,6 +8,7 @@ set(CSOPESY_CORE_SOURCES
     src/ConfigParser.cpp
     src/ConsoleManager.cpp
     src/Instruction.cpp
+    src/MemoryManager.cpp
     src/Process.cpp
     src/ProcessTable.cpp
     src/Scheduler.cpp

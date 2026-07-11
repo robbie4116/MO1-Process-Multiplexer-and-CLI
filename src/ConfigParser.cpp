@@ -98,6 +98,25 @@ bool ConfigParser::parse(const std::string& filename, Config& out) {
             if (!parseUnsigned(value, parsed.delayPerExec)) {
                 return fail("delay-per-exec must be a uint32 value");
             }
+        } else if (key == "delay-per-exec") {
+            if (!parseUnsigned(value, parsed.delayPerExec)) {
+                return fail("delay-per-exec must be a uint32 value");
+            }
+        } else if (key == "max-overall-mem") {
+            if (!parseUnsigned(value, parsed.maxOverallMem) ||
+                parsed.maxOverallMem == 0) {
+                return fail("max-overall-mem must be at least 1");
+            }
+        } else if (key == "mem-per-frame") {
+            if (!parseUnsigned(value, parsed.memPerFrame) ||
+                parsed.memPerFrame == 0) {
+                return fail("mem-per-frame must be at least 1");
+            }
+        } else if (key == "mem-per-proc") {
+            if (!parseUnsigned(value, parsed.memPerProc) ||
+                parsed.memPerProc == 0) {
+                return fail("mem-per-proc must be at least 1");
+            }
         } else {
             return fail("unknown key '" + key + "'");
         }
@@ -105,13 +124,20 @@ bool ConfigParser::parse(const std::string& filename, Config& out) {
 
     static const std::set<std::string> required{
         "num-cpu", "scheduler", "quantum-cycles", "batch-process-freq",
-        "min-ins", "max-ins", "delay-per-exec"
+        "min-ins", "max-ins", "delay-per-exec",
+        "max-overall-mem", "mem-per-frame", "mem-per-proc"
     };
     if (found != required) return fail("one or more required keys are missing");
     if (parsed.minIns > parsed.maxIns) {
         return fail("min-ins must not exceed max-ins");
     }
-
+    if (parsed.minIns > parsed.maxIns) {
+        return fail("min-ins must not exceed max-ins");
+    }
+    if (parsed.memPerProc > parsed.maxOverallMem) {
+        return fail("mem-per-proc must not exceed max-overall-mem");
+    }
+    
     out = parsed;
     return true;
 }

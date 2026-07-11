@@ -12,6 +12,7 @@
 #include <atomic>
 #include "SimProcess.h"
 #include "Config.h"
+#include "MemoryManager.h"
 
 struct CoreStatus {
     int id       = -1;
@@ -73,8 +74,10 @@ private:
     void releaseCore(int coreIndex);
     void dispatchFreeCores();
     std::string makeProcessName(int idx);
+    void writeMemorySnapshot(int qq);
 
     Config cfg_;
+    MemoryManager memMgr_;
 
     mutable std::mutex mutex_;
     std::condition_variable cv_;

@@ -40,6 +40,7 @@ public:
     std::atomic<uint64_t>  currentInstruction{0};
     std::atomic<int>       coreId{-1};
     std::atomic<ProcState> state{ProcState::READY};
+    std::atomic<bool>      inMemory{false};
 
 private:
     uint16_t& getOrDeclareVar(const std::string& varName);

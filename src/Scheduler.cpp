@@ -9,8 +9,11 @@
 #include <sstream>
 #include <iomanip>
 #include <stdexcept>
+#include <fstream>
+#include <filesystem>
 
-Scheduler::Scheduler(const Config& cfg) : cfg_(cfg) {
+Scheduler::Scheduler(const Config& cfg) : cfg_(cfg), 
+    memMgr_(cfg_.maxOverallMem, cfg_.memPerProc) {
     cores_.resize(cfg_.numCpu);
     quantumLeft_.resize(cfg_.numCpu, cfg_.quantumCycles);
     for (int i = 0; i < cfg_.numCpu; ++i) cores_[i].id = i;
@@ -175,6 +178,18 @@ void Scheduler::dispatchFCFS() {
         if (core.busy || readyQueue_.empty()) continue;
         auto proc = readyQueue_.front();
         readyQueue_.pop();
+
+        if (!proc->inMemory.load()) {
+            uint32_t base = 0;
+            if (memMgr_.allocate(proc->name, base)) {
+                proc->inMemory.store(true);
+            } else {
+                // Memory full: no backing store, revert to tail of ready queue.
+                readyQueue_.push(proc);
+                continue;
+            }
+        }
+
         proc->state.store(ProcState::RUNNING);
         proc->coreId.store(core.id);
         core.assigned = proc;
@@ -189,6 +204,18 @@ void Scheduler::dispatchRR() {
         if (!core.busy && !readyQueue_.empty()) {
             auto proc = readyQueue_.front();
             readyQueue_.pop();
+
+            if (!proc->inMemory.load()) {
+                uint32_t base = 0;
+                if (memMgr_.allocate(proc->name, base)) {
+                    proc->inMemory.store(true);
+                } else {
+                    // Memory full: no backing store, revert to tail of ready queue.
+                    readyQueue_.push(proc);
+                    continue;
+                }
+            }
+
             proc->state.store(ProcState::RUNNING);
             proc->coreId.store(core.id);
             core.assigned = proc;
@@ -243,6 +270,8 @@ void Scheduler::mainLoop() {
                         proc->state.store(ProcState::FINISHED);
                         proc->coreId.store(-1);
                         proc->clearDelay();
+                        memMgr_.free(proc->name);
+                        proc->inMemory.store(false);
                         finished_.push_back(proc);
                         releaseCore(i);
                         continue;
@@ -280,9 +309,51 @@ void Scheduler::mainLoop() {
             dispatchFreeCores();
 
             cpuCycles_.fetch_add(1);
+
+            // 6. Every quantum-cycles ticks, dump a memory snapshot.
+            uint64_t elapsedTicks = cpuCycles_.load();
+            if (cfg_.quantumCycles > 0 && elapsedTicks % cfg_.quantumCycles == 0) {
+                int qq = static_cast<int>(elapsedTicks / cfg_.quantumCycles) - 1;
+                writeMemorySnapshot(qq);
+            }
         }
         // CPU ticks are simulated. This sleep only prevents the emulator from
         // monopolizing the host CPU and does not change simulated utilization.
         std::this_thread::sleep_for(std::chrono::milliseconds(1));
     }
+}
+
+void Scheduler::writeMemorySnapshot(int qq) {
+    namespace fs = std::filesystem;
+
+    const fs::path outDir = "memorystamp";
+    std::error_code ec;
+    fs::create_directories(outDir, ec);
+    if (ec) {
+        std::cerr << "Error: could not create memorystamp directory: "
+                  << ec.message() << '\n';
+        return;
+    }
+
+    const fs::path outPath =
+        outDir / ("memory_stamp_" + std::to_string(qq) + ".txt");
+
+    std::ofstream file(outPath);
+    if (!file.is_open()) return;
+
+    file << "Timestamp: (" << utils::getCurrentTimestamp() << ")\n";
+    file << "Number of processes in memory: "
+         << memMgr_.numProcessesInMemory() << "\n";
+    file << "Total external fragmentation in KB: "
+         << memMgr_.totalExternalFragmentation() << "\n\n";
+
+    file << "----end---- = " << memMgr_.totalMemory() << "\n\n";
+
+    for (const auto& block : memMgr_.allocatedBlocksDescending()) {
+        file << (block.start + block.size) << "\n";
+        file << block.procName << "\n";
+        file << block.start << "\n\n";
+    }
+
+    file << "----start----- = 0\n";
 }
